@@ -4,21 +4,24 @@ pipeline {
 
     environment {
 
-        DOCKERHUB_USER = 'piraidasan'
-
-        BACKEND_IMAGE = 'piraidasan/etmsys-backend'
+        BACKEND_IMAGE  = 'piraidasan/etmsys-backend'
         FRONTEND_IMAGE = 'piraidasan/etmsys-frontend'
 
         DOCKER_CREDENTIALS = 'dockerhub-creds'
+        GITHUB_CREDENTIALS = 'github-creds'
+
+        // Current Docker-host environment
+        BACKEND_PORT = '9093'
+        FRONTEND_PORT = '8081'
+
+        // Current MySQL server
+        DB_HOST = '172.16.1.89'
+        DB_PORT = '3306'
+        DB_NAME = 'etmsys'
+        DB_USER = 'javi'
     }
 
     stages {
-
-        /*
-         * =========================================================
-         * 1. CHECK TOOLS
-         * =========================================================
-         */
 
         stage('Check Tools') {
 
@@ -26,6 +29,10 @@ pipeline {
 
                 sh '''
                     set -e
+
+                    echo "========================================"
+                    echo "ETMSYS CI/CD - CHECK TOOLS"
+                    echo "========================================"
 
                     echo "===== Git ====="
                     git --version
@@ -44,16 +51,12 @@ pipeline {
 
                     echo "===== Docker ====="
                     docker version
+
+                    echo "========================================"
                 '''
             }
         }
 
-
-        /*
-         * =========================================================
-         * 2. CHECKOUT BACKEND
-         * =========================================================
-         */
 
         stage('Checkout Backend') {
 
@@ -61,9 +64,11 @@ pipeline {
 
                 dir('backend') {
 
+                    deleteDir()
+
                     git(
                         branch: 'main',
-                        credentialsId: 'github-creds',
+                        credentialsId: "${GITHUB_CREDENTIALS}",
                         url: 'https://github.com/piraidasan/TMS-backend.git'
                     )
                 }
@@ -71,33 +76,23 @@ pipeline {
         }
 
 
-        /*
-         * =========================================================
-         * 3. CHECKOUT FRONTEND
-         * =========================================================
-         */
-
         stage('Checkout Frontend') {
 
             steps {
 
                 dir('frontend') {
 
+                    deleteDir()
+
                     git(
                         branch: 'main',
-                        credentialsId: 'github-creds',
+                        credentialsId: "${GITHUB_CREDENTIALS}",
                         url: 'https://github.com/piraidasan/TMS-Frontend.git'
                     )
                 }
             }
         }
 
-
-        /*
-         * =========================================================
-         * 4. BUILD BACKEND
-         * =========================================================
-         */
 
         stage('Build Backend') {
 
@@ -108,7 +103,9 @@ pipeline {
                     sh '''
                         set -e
 
-                        echo "===== Backend Build ====="
+                        echo "========================================"
+                        echo "BUILDING ETMSYS BACKEND"
+                        echo "========================================"
 
                         java -version
                         mvn -version
@@ -124,12 +121,6 @@ pipeline {
         }
 
 
-        /*
-         * =========================================================
-         * 5. BUILD FRONTEND
-         * =========================================================
-         */
-
         stage('Build Frontend') {
 
             steps {
@@ -139,11 +130,11 @@ pipeline {
                     sh '''
                         set -e
 
-                        echo "===== Frontend Dependencies ====="
+                        echo "========================================"
+                        echo "BUILDING ETMSYS FRONTEND"
+                        echo "========================================"
 
                         npm ci
-
-                        echo "===== Angular Production Build ====="
 
                         npm run build
 
@@ -156,12 +147,6 @@ pipeline {
         }
 
 
-        /*
-         * =========================================================
-         * 6. BUILD BACKEND DOCKER IMAGE
-         * =========================================================
-         */
-
         stage('Build Backend Docker Image') {
 
             steps {
@@ -171,10 +156,16 @@ pipeline {
                     sh '''
                         set -e
 
+                        echo "========================================"
+                        echo "BUILD BACKEND DOCKER IMAGE"
+                        echo "========================================"
+
                         docker build \
                             -t ${BACKEND_IMAGE}:${BUILD_NUMBER} \
                             -t ${BACKEND_IMAGE}:latest \
                             .
+
+                        echo "===== Backend Images ====="
 
                         docker images | grep etmsys-backend
                     '''
@@ -182,12 +173,6 @@ pipeline {
             }
         }
 
-
-        /*
-         * =========================================================
-         * 7. BUILD FRONTEND DOCKER IMAGE
-         * =========================================================
-         */
 
         stage('Build Frontend Docker Image') {
 
@@ -198,10 +183,16 @@ pipeline {
                     sh '''
                         set -e
 
+                        echo "========================================"
+                        echo "BUILD FRONTEND DOCKER IMAGE"
+                        echo "========================================"
+
                         docker build \
                             -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} \
                             -t ${FRONTEND_IMAGE}:latest \
                             .
+
+                        echo "===== Frontend Images ====="
 
                         docker images | grep etmsys-frontend
                     '''
@@ -210,11 +201,88 @@ pipeline {
         }
 
 
-        /*
-         * =========================================================
-         * 8. DOCKER HUB LOGIN
-         * =========================================================
-         */
+        stage('Test Backend Container') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "========================================"
+                    echo "TEST BACKEND DOCKER IMAGE"
+                    echo "========================================"
+
+                    docker rm -f etmsys-backend-test 2>/dev/null || true
+
+                    docker run -d \
+                        --name etmsys-backend-test \
+                        -p 19093:9093 \
+                        ${BACKEND_IMAGE}:${BUILD_NUMBER}
+
+                    echo "Waiting for backend..."
+
+                    sleep 15
+
+                    docker ps | grep etmsys-backend-test
+
+                    echo "===== Backend Logs ====="
+
+                    docker logs --tail 50 etmsys-backend-test
+
+                    echo "===== Backend Test ====="
+
+                    curl -f \
+                        http://127.0.0.1:19093/etmsys/v1/user/captcha
+
+                    echo
+
+                    docker rm -f etmsys-backend-test
+                '''
+            }
+        }
+
+
+        stage('Test Frontend Container') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "========================================"
+                    echo "TEST FRONTEND DOCKER IMAGE"
+                    echo "========================================"
+
+                    docker rm -f etmsys-frontend-test 2>/dev/null || true
+
+                    docker run -d \
+                        --name etmsys-frontend-test \
+                        -p 18081:80 \
+                        ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+
+                    echo "Waiting for frontend..."
+
+                    sleep 5
+
+                    docker ps | grep etmsys-frontend-test
+
+                    echo "===== NGINX CONFIG TEST ====="
+
+                    docker exec \
+                        etmsys-frontend-test \
+                        nginx -t
+
+                    echo "===== Frontend HTTP Test ====="
+
+                    curl -f http://127.0.0.1:18081/
+
+                    echo
+
+                    docker rm -f etmsys-frontend-test
+                '''
+            }
+        }
+
 
         stage('Docker Hub Login') {
 
@@ -222,7 +290,7 @@ pipeline {
 
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'dockerhub-creds',
+                        credentialsId: "${DOCKER_CREDENTIALS}",
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
@@ -232,7 +300,7 @@ pipeline {
                         set -e
 
                         echo "$DOCKER_PASSWORD" | \
-                        docker login \
+                            docker login \
                             --username "$DOCKER_USER" \
                             --password-stdin
                     '''
@@ -241,12 +309,6 @@ pipeline {
         }
 
 
-        /*
-         * =========================================================
-         * 9. PUSH BACKEND
-         * =========================================================
-         */
-
         stage('Push Backend Image') {
 
             steps {
@@ -254,19 +316,14 @@ pipeline {
                 sh '''
                     set -e
 
-                    docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                    echo "Pushing backend:"
 
-                    docker push ${BACKEND_IMAGE}:latest
+                    docker push \
+                        ${BACKEND_IMAGE}:${BUILD_NUMBER}
                 '''
             }
         }
 
-
-        /*
-         * =========================================================
-         * 10. PUSH FRONTEND
-         * =========================================================
-         */
 
         stage('Push Frontend Image') {
 
@@ -275,38 +332,50 @@ pipeline {
                 sh '''
                     set -e
 
-                    docker push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                    echo "Pushing frontend:"
 
-                    docker push ${FRONTEND_IMAGE}:latest
+                    docker push \
+                        ${FRONTEND_IMAGE}:${BUILD_NUMBER}
                 '''
             }
         }
 
 
-        /*
-         * =========================================================
-         * 11. VERIFY IMAGES
-         * =========================================================
-         */
-
-        stage('Verify Docker Images') {
+        stage('Push Latest Tags') {
 
             steps {
 
                 sh '''
                     set -e
 
-                    echo "===== Backend ====="
+                    docker push \
+                        ${BACKEND_IMAGE}:latest
+
+                    docker push \
+                        ${FRONTEND_IMAGE}:latest
+                '''
+            }
+        }
+
+
+        stage('Verify Images') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "========================================"
+                    echo "VERIFY DOCKER IMAGES"
+                    echo "========================================"
 
                     docker image inspect \
                         ${BACKEND_IMAGE}:${BUILD_NUMBER}
 
-                    echo "===== Frontend ====="
-
                     docker image inspect \
                         ${FRONTEND_IMAGE}:${BUILD_NUMBER}
 
-                    echo "===== Images ====="
+                    echo "===== ETMSYS Images ====="
 
                     docker images | grep etmsys
                 '''
@@ -315,43 +384,61 @@ pipeline {
     }
 
 
-    /*
-     * =============================================================
-     * POST ACTIONS
-     * =============================================================
-     */
-
     post {
 
         success {
 
-            echo '''
+            echo """
             ==========================================
               ETMSYS CI/CD BUILD SUCCESS
             ==========================================
-            '''
 
-            echo "Backend Image:"
-            echo "${BACKEND_IMAGE}:${BUILD_NUMBER}"
+            Jenkins Build:
+            ${BUILD_NUMBER}
 
-            echo "Frontend Image:"
-            echo "${FRONTEND_IMAGE}:${BUILD_NUMBER}"
+            Backend:
+            ${BACKEND_IMAGE}:${BUILD_NUMBER}
+
+            Frontend:
+            ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+
+            Backend Port:
+            ${BACKEND_PORT}
+
+            Frontend Port:
+            ${FRONTEND_PORT}
+
+            MySQL:
+            ${DB_HOST}:${DB_PORT}
+
+            Database:
+            ${DB_NAME}
+
+            ==========================================
+            """
         }
 
 
         failure {
 
-            echo '''
+            echo """
             ==========================================
               ETMSYS CI/CD BUILD FAILED
             ==========================================
-            '''
+
+            Check the failed Jenkins stage.
+
+            ==========================================
+            """
         }
 
 
         always {
 
             sh '''
+                docker rm -f etmsys-backend-test 2>/dev/null || true
+                docker rm -f etmsys-frontend-test 2>/dev/null || true
+
                 docker logout || true
             '''
         }
