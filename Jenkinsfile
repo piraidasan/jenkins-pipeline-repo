@@ -414,18 +414,6 @@ pipeline {
          * =========================================================
          * 9. TEST BACKEND DOCKER CONTAINER
          * =========================================================
-         *
-         * IMPORTANT:
-         * The backend requires MySQL configuration.
-         *
-         * Jenkins credential:
-         *
-         *     etmsys-db-creds
-         *
-         * Username = javi
-         * Password = MySQL password
-         *
-         * =========================================================
          */
 
         stage('Test Backend Container') {
@@ -833,6 +821,179 @@ pipeline {
             }
         }
 
+
+        /*
+         * =========================================================
+         * 16. DEPLOY APPLICATIONS
+         * =========================================================
+         */
+
+        stage('Deploy Applications') {
+
+            steps {
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'etmsys-db-creds',
+                        usernameVariable: 'MYSQL_USERNAME',
+                        passwordVariable: 'MYSQL_PASSWORD'
+                    )
+                ]) {
+
+                    sh '''
+                        set -e
+
+                        echo "========================================"
+                        echo "ETMSYS PRODUCTION DEPLOYMENT"
+                        echo "========================================"
+
+                        OLD_BACKEND_IMAGE="etmsys-backend:v1"
+                        OLD_FRONTEND_IMAGE="etmsys-frontend:v4"
+
+                        NEW_BACKEND_IMAGE="${BACKEND_IMAGE}:${BUILD_NUMBER}"
+                        NEW_FRONTEND_IMAGE="${FRONTEND_IMAGE}:${BUILD_NUMBER}"
+
+                        echo ""
+                        echo "New Backend:"
+                        echo "$NEW_BACKEND_IMAGE"
+
+                        echo "New Frontend:"
+                        echo "$NEW_FRONTEND_IMAGE"
+
+                        echo ""
+                        echo "========================================"
+                        echo "STOPPING CURRENT APPLICATION"
+                        echo "========================================"
+
+                        docker stop backend 2>/dev/null || true
+                        docker stop frontend 2>/dev/null || true
+
+                        docker rm backend 2>/dev/null || true
+                        docker rm frontend 2>/dev/null || true
+
+                        echo ""
+                        echo "========================================"
+                        echo "STARTING NEW BACKEND"
+                        echo "========================================"
+
+                        docker run -d \
+                            --name backend \
+                            --restart always \
+                            -p ${BACKEND_PORT}:9093 \
+                            -e SPRING_DATASOURCE_URL="jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
+                            -e SPRING_DATASOURCE_USERNAME="${MYSQL_USERNAME}" \
+                            -e SPRING_DATASOURCE_PASSWORD="${MYSQL_PASSWORD}" \
+                            -e SERVER_PORT=9093 \
+                            "$NEW_BACKEND_IMAGE"
+
+                        echo ""
+                        echo "Waiting for backend..."
+
+                        BACKEND_READY=false
+
+                        for i in $(seq 1 30)
+                        do
+                            echo "Backend health check ${i}/30..."
+
+                            if curl -s \
+                                --fail \
+                                http://127.0.0.1:${BACKEND_PORT}/etmsys/v1/user/captcha \
+                                > /tmp/backend-prod-response.txt 2>/dev/null
+                            then
+                                BACKEND_READY=true
+                                echo "Backend is healthy."
+                                break
+                            fi
+
+                            sleep 5
+                        done
+
+                        if [ "$BACKEND_READY" != "true" ]
+                        then
+
+                            echo ""
+                            echo "========================================"
+                            echo "BACKEND DEPLOYMENT FAILED"
+                            echo "========================================"
+
+                            docker logs --tail 200 backend || true
+
+                            echo ""
+                            echo "Rolling back backend..."
+
+                            docker rm -f backend 2>/dev/null || true
+
+                            docker run -d \
+                                --name backend \
+                                --restart always \
+                                -p ${BACKEND_PORT}:9093 \
+                                -e SPRING_DATASOURCE_URL="jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
+                                -e SPRING_DATASOURCE_USERNAME="${MYSQL_USERNAME}" \
+                                -e SPRING_DATASOURCE_PASSWORD="${MYSQL_PASSWORD}" \
+                                -e SERVER_PORT=9093 \
+                                "$OLD_BACKEND_IMAGE"
+
+                            echo "Backend rollback completed."
+
+                            exit 1
+                        fi
+
+                        echo ""
+                        echo "========================================"
+                        echo "STARTING NEW FRONTEND"
+                        echo "========================================"
+
+                        docker run -d \
+                            --name frontend \
+                            --restart always \
+                            -p ${FRONTEND_PORT}:80 \
+                            "$NEW_FRONTEND_IMAGE"
+
+                        echo ""
+                        echo "Waiting for frontend..."
+
+                        sleep 5
+
+                        docker exec frontend nginx -t
+
+                        curl --fail \
+                            --show-error \
+                            --retry 10 \
+                            --retry-delay 2 \
+                            --retry-connrefused \
+                            http://127.0.0.1:${FRONTEND_PORT}/
+
+                        echo ""
+                        echo "========================================"
+                        echo "FRONTEND DEPLOYMENT SUCCESS"
+                        echo "========================================"
+
+                        echo ""
+                        echo "========================================"
+                        echo "APPLICATION STATUS"
+                        echo "========================================"
+
+                        docker ps \
+                            --filter name=backend \
+                            --filter name=frontend
+
+                        echo ""
+                        echo "Backend:"
+                        echo "http://172.16.1.89:${BACKEND_PORT}"
+
+                        echo ""
+                        echo "Frontend:"
+                        echo "http://172.16.1.89:${FRONTEND_PORT}"
+
+                        echo ""
+                        echo "========================================"
+                        echo "DEPLOYMENT SUCCESS"
+                        echo "========================================"
+                    '''
+                }
+            }
+        }
+
     }
 
 
@@ -889,7 +1050,7 @@ pipeline {
 
 
             ==========================================
-                 CI/CD PIPELINE COMPLETED
+                 CI/CD PIPLETED SUCCESSFULLY
             ==========================================
             """
         }
