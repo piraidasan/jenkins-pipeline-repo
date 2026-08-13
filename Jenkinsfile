@@ -9,39 +9,49 @@ pipeline {
          * JAVA 21
          * =========================================================
          */
+
         JAVA_HOME = '/usr/lib/jvm/java-21-openjdk'
+
 
         /*
          * =========================================================
          * DOCKER HUB
          * =========================================================
          */
+
         BACKEND_IMAGE  = 'piraidasan/etmsys-backend'
         FRONTEND_IMAGE = 'piraidasan/etmsys-frontend'
 
         DOCKER_CREDENTIALS = 'dockerhub-creds'
         GITHUB_CREDENTIALS = 'github-creds'
 
+
         /*
          * =========================================================
          * APPLICATION PORTS
          * =========================================================
          */
+
         BACKEND_PORT  = '9093'
         FRONTEND_PORT = '8081'
 
+
         /*
          * =========================================================
-         * MYSQL
+         * MYSQL DATABASE
          * =========================================================
          */
+
         DB_HOST = '172.16.1.89'
         DB_PORT = '3306'
         DB_NAME = 'etmsys'
         DB_USER = 'javi'
+
     }
 
+
     stages {
+
 
         /*
          * =========================================================
@@ -105,6 +115,8 @@ pipeline {
 
                     echo ""
                     echo "========================================"
+                    echo "TOOL CHECK SUCCESS"
+                    echo "========================================"
                 '''
             }
         }
@@ -112,7 +124,48 @@ pipeline {
 
         /*
          * =========================================================
-         * 2. CHECKOUT BACKEND
+         * 2. CHECK MYSQL CONNECTIVITY
+         * =========================================================
+         */
+
+        stage('Check MySQL Connectivity') {
+
+            steps {
+
+                sh '''
+                    set -e
+
+                    echo "========================================"
+                    echo "CHECK MYSQL CONNECTIVITY"
+                    echo "========================================"
+
+                    echo ""
+                    echo "Database Host : ${DB_HOST}"
+                    echo "Database Port : ${DB_PORT}"
+                    echo "Database Name : ${DB_NAME}"
+                    echo "Database User : ${DB_USER}"
+
+                    echo ""
+                    echo "Checking TCP connectivity..."
+
+                    timeout 5 bash -c \
+                        "</dev/tcp/${DB_HOST}/${DB_PORT}"
+
+                    echo ""
+                    echo "MySQL TCP port is reachable."
+
+                    echo ""
+                    echo "========================================"
+                    echo "MYSQL CONNECTIVITY SUCCESS"
+                    echo "========================================"
+                '''
+            }
+        }
+
+
+        /*
+         * =========================================================
+         * 3. CHECKOUT BACKEND
          * =========================================================
          */
 
@@ -136,7 +189,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 3. CHECKOUT FRONTEND
+         * 4. CHECKOUT FRONTEND
          * =========================================================
          */
 
@@ -160,7 +213,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 4. BUILD BACKEND
+         * 5. BUILD BACKEND
          * =========================================================
          */
 
@@ -200,6 +253,11 @@ pipeline {
 
                         echo ""
                         echo "Backend build completed successfully."
+
+                        echo ""
+                        echo "========================================"
+                        echo "BACKEND BUILD SUCCESS"
+                        echo "========================================"
                     '''
                 }
             }
@@ -208,7 +266,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 5. BUILD FRONTEND
+         * 6. BUILD FRONTEND
          * =========================================================
          */
 
@@ -255,6 +313,11 @@ pipeline {
 
                         echo ""
                         echo "Frontend build completed successfully."
+
+                        echo ""
+                        echo "========================================"
+                        echo "FRONTEND BUILD SUCCESS"
+                        echo "========================================"
                     '''
                 }
             }
@@ -263,7 +326,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 6. BUILD BACKEND DOCKER IMAGE
+         * 7. BUILD BACKEND DOCKER IMAGE
          * =========================================================
          */
 
@@ -293,6 +356,11 @@ pipeline {
                         echo ""
                         echo "Backend Docker image created:"
                         echo "${BACKEND_IMAGE}:${BUILD_NUMBER}"
+
+                        echo ""
+                        echo "========================================"
+                        echo "BACKEND DOCKER BUILD SUCCESS"
+                        echo "========================================"
                     '''
                 }
             }
@@ -301,7 +369,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 7. BUILD FRONTEND DOCKER IMAGE
+         * 8. BUILD FRONTEND DOCKER IMAGE
          * =========================================================
          */
 
@@ -331,6 +399,11 @@ pipeline {
                         echo ""
                         echo "Frontend Docker image created:"
                         echo "${FRONTEND_IMAGE}:${BUILD_NUMBER}"
+
+                        echo ""
+                        echo "========================================"
+                        echo "FRONTEND DOCKER BUILD SUCCESS"
+                        echo "========================================"
                     '''
                 }
             }
@@ -339,7 +412,19 @@ pipeline {
 
         /*
          * =========================================================
-         * 8. TEST BACKEND CONTAINER
+         * 9. TEST BACKEND DOCKER CONTAINER
+         * =========================================================
+         *
+         * IMPORTANT:
+         * The backend requires MySQL configuration.
+         *
+         * Jenkins credential:
+         *
+         *     etmsys-db-creds
+         *
+         * Username = javi
+         * Password = MySQL password
+         *
          * =========================================================
          */
 
@@ -347,60 +432,152 @@ pipeline {
 
             steps {
 
-                sh '''
-                    set -e
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'etmsys-db-creds',
+                        usernameVariable: 'MYSQL_USERNAME',
+                        passwordVariable: 'MYSQL_PASSWORD'
+                    )
+                ]) {
 
-                    echo "========================================"
-                    echo "TEST BACKEND DOCKER IMAGE"
-                    echo "========================================"
+                    sh '''
+                        set -e
 
-                    docker rm -f etmsys-backend-test 2>/dev/null || true
+                        echo "========================================"
+                        echo "TEST BACKEND DOCKER IMAGE"
+                        echo "========================================"
 
-                    echo ""
-                    echo "Starting backend test container..."
+                        docker rm -f etmsys-backend-test 2>/dev/null || true
 
-                    docker run -d \
-                        --name etmsys-backend-test \
-                        -p 19093:9093 \
-                        ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                        echo ""
+                        echo "Starting backend test container..."
 
-                    echo ""
-                    echo "Waiting for backend application..."
+                        docker run -d \
+                            --name etmsys-backend-test \
+                            -p 19093:9093 \
+                            -e SPRING_DATASOURCE_URL="jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
+                            -e SPRING_DATASOURCE_USERNAME="${MYSQL_USERNAME}" \
+                            -e SPRING_DATASOURCE_PASSWORD="${MYSQL_PASSWORD}" \
+                            -e SERVER_PORT=9093 \
+                            ${BACKEND_IMAGE}:${BUILD_NUMBER}
 
-                    sleep 20
+                        echo ""
+                        echo "Backend container started."
 
-                    echo ""
-                    echo "===== Container ====="
+                        echo ""
+                        echo "===== Container ID ====="
 
-                    docker ps -a | grep etmsys-backend-test
+                        docker ps -a \
+                            --filter name=etmsys-backend-test
 
-                    echo ""
-                    echo "===== Backend Logs ====="
+                        echo ""
+                        echo "Waiting for Spring Boot application..."
 
-                    docker logs --tail 100 etmsys-backend-test
+                        BACKEND_READY=false
 
-                    echo ""
-                    echo "===== Backend API Test ====="
+                        for i in $(seq 1 30)
+                        do
 
-                    curl --fail --show-error \
-                        --retry 5 \
-                        --retry-delay 3 \
-                        --retry-connrefused \
-                        http://127.0.0.1:19093/etmsys/v1/user/captcha
+                            echo "Health check attempt ${i}/30..."
 
-                    echo ""
-                    echo ""
-                    echo "Backend container test SUCCESS."
+                            if curl -s \
+                                --fail \
+                                http://127.0.0.1:19093/etmsys/v1/user/captcha \
+                                > /tmp/backend-response.txt 2>/dev/null
+                            then
 
-                    docker rm -f etmsys-backend-test
-                '''
+                                echo ""
+                                echo "Backend API is responding."
+
+                                BACKEND_READY=true
+
+                                break
+                            fi
+
+                            if ! docker inspect \
+                                -f '{{.State.Running}}' \
+                                etmsys-backend-test 2>/dev/null | grep -q true
+                            then
+
+                                echo ""
+                                echo "Backend container has stopped."
+
+                                break
+                            fi
+
+                            sleep 5
+
+                        done
+
+
+                        echo ""
+                        echo "========================================"
+                        echo "BACKEND CONTAINER STATUS"
+                        echo "========================================"
+
+                        docker ps -a \
+                            --filter name=etmsys-backend-test
+
+
+                        echo ""
+                        echo "========================================"
+                        echo "BACKEND CONTAINER LOGS"
+                        echo "========================================"
+
+                        docker logs \
+                            --tail 200 \
+                            etmsys-backend-test || true
+
+
+                        if [ "$BACKEND_READY" != "true" ]
+                        then
+
+                            echo ""
+                            echo "========================================"
+                            echo "BACKEND TEST FAILED"
+                            echo "========================================"
+
+                            echo ""
+                            echo "Possible causes:"
+                            echo "1. MySQL connection failure"
+                            echo "2. Wrong DB username/password"
+                            echo "3. Spring Boot configuration failure"
+                            echo "4. Database schema problem"
+                            echo "5. Application startup exception"
+                            echo "6. Port 9093 configuration problem"
+
+                            echo ""
+                            echo "Inspect complete container logs above."
+
+                            exit 1
+
+                        fi
+
+
+                        echo ""
+                        echo "========================================"
+                        echo "BACKEND API TEST SUCCESS"
+                        echo "========================================"
+
+                        echo ""
+                        echo "Endpoint:"
+                        echo "http://127.0.0.1:19093/etmsys/v1/user/captcha"
+
+
+                        echo ""
+                        echo "Backend container test SUCCESS."
+
+                        docker rm -f etmsys-backend-test
+
+                    '''
+                }
             }
         }
 
 
         /*
          * =========================================================
-         * 9. TEST FRONTEND CONTAINER
+         * 10. TEST FRONTEND DOCKER CONTAINER
          * =========================================================
          */
 
@@ -430,10 +607,13 @@ pipeline {
 
                     sleep 5
 
+
                     echo ""
                     echo "===== Container ====="
 
-                    docker ps -a | grep etmsys-frontend-test
+                    docker ps -a \
+                        --filter name=etmsys-frontend-test
+
 
                     echo ""
                     echo "===== NGINX Configuration ====="
@@ -442,20 +622,28 @@ pipeline {
                         etmsys-frontend-test \
                         nginx -t
 
+
                     echo ""
                     echo "===== Frontend HTTP Test ====="
 
-                    curl --fail --show-error \
-                        --retry 5 \
+                    curl --fail \
+                        --show-error \
+                        --retry 10 \
                         --retry-delay 2 \
                         --retry-connrefused \
                         http://127.0.0.1:18081/
 
-                    echo ""
+
                     echo ""
                     echo "Frontend container test SUCCESS."
 
                     docker rm -f etmsys-frontend-test
+
+
+                    echo ""
+                    echo "========================================"
+                    echo "FRONTEND CONTAINER TEST SUCCESS"
+                    echo "========================================"
                 '''
             }
         }
@@ -463,7 +651,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 10. DOCKER HUB LOGIN
+         * 11. DOCKER HUB LOGIN
          * =========================================================
          */
 
@@ -491,6 +679,7 @@ pipeline {
                             --username "$DOCKER_USER" \
                             --password-stdin
 
+                        echo ""
                         echo "Docker Hub login successful."
                     '''
                 }
@@ -500,7 +689,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 11. PUSH BACKEND IMAGE
+         * 12. PUSH BACKEND IMAGE
          * =========================================================
          */
 
@@ -528,7 +717,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 12. PUSH FRONTEND IMAGE
+         * 13. PUSH FRONTEND IMAGE
          * =========================================================
          */
 
@@ -556,7 +745,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 13. PUSH LATEST
+         * 14. PUSH LATEST TAGS
          * =========================================================
          */
 
@@ -586,7 +775,7 @@ pipeline {
 
         /*
          * =========================================================
-         * 14. VERIFY IMAGES
+         * 15. VERIFY IMAGES
          * =========================================================
          */
 
@@ -601,11 +790,13 @@ pipeline {
                     echo "VERIFY DOCKER IMAGES"
                     echo "========================================"
 
+
                     echo ""
                     echo "===== Backend ====="
 
                     docker image inspect \
                         ${BACKEND_IMAGE}:${BUILD_NUMBER}
+
 
                     echo ""
                     echo "===== Frontend ====="
@@ -613,10 +804,26 @@ pipeline {
                     docker image inspect \
                         ${FRONTEND_IMAGE}:${BUILD_NUMBER}
 
+
                     echo ""
                     echo "===== ETMSYS Images ====="
 
                     docker images | grep etmsys
+
+
+                    echo ""
+                    echo "===== Backend Image ====="
+
+                    docker images \
+                        ${BACKEND_IMAGE}
+
+
+                    echo ""
+                    echo "===== Frontend Image ====="
+
+                    docker images \
+                        ${FRONTEND_IMAGE}
+
 
                     echo ""
                     echo "========================================"
@@ -625,6 +832,7 @@ pipeline {
                 '''
             }
         }
+
     }
 
 
@@ -636,6 +844,7 @@ pipeline {
 
     post {
 
+
         success {
 
             echo """
@@ -646,30 +855,41 @@ pipeline {
             Jenkins Build:
             ${BUILD_NUMBER}
 
+
             Backend Image:
             ${BACKEND_IMAGE}:${BUILD_NUMBER}
+
 
             Frontend Image:
             ${FRONTEND_IMAGE}:${BUILD_NUMBER}
 
+
             Backend Latest:
             ${BACKEND_IMAGE}:latest
+
 
             Frontend Latest:
             ${FRONTEND_IMAGE}:latest
 
+
             Application Backend:
             http://172.16.1.89:${BACKEND_PORT}
+
 
             Application Frontend:
             http://172.16.1.89:${FRONTEND_PORT}
 
+
             MySQL:
             ${DB_HOST}:${DB_PORT}
+
 
             Database:
             ${DB_NAME}
 
+
+            ==========================================
+                 CI/CD PIPELINE COMPLETED
             ==========================================
             """
         }
@@ -685,8 +905,20 @@ pipeline {
             Jenkins Build:
             ${BUILD_NUMBER}
 
+
+            Backend Image:
+            ${BACKEND_IMAGE}:${BUILD_NUMBER}
+
+
+            Frontend Image:
+            ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+
+
             Check the failed stage in Jenkins Console Output.
 
+
+            ==========================================
+                 PIPELINE FAILED
             ==========================================
             """
         }
@@ -695,14 +927,31 @@ pipeline {
         always {
 
             sh '''
-                echo "Cleaning temporary test containers..."
+                echo ""
+                echo "========================================"
+                echo "CLEANUP"
+                echo "========================================"
+
+                echo ""
+                echo "Cleaning temporary backend test container..."
 
                 docker rm -f etmsys-backend-test 2>/dev/null || true
+
+
+                echo ""
+                echo "Cleaning temporary frontend test container..."
+
                 docker rm -f etmsys-frontend-test 2>/dev/null || true
 
+
+                echo ""
                 echo "Logging out from Docker Hub..."
 
-                docker logout || true
+                docker logout 2>/dev/null || true
+
+
+                echo ""
+                echo "Cleanup completed."
             '''
         }
     }
