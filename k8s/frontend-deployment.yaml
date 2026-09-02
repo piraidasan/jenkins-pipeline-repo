@@ -7,6 +7,14 @@ metadata:
 spec:
   replicas: 2
 
+  revisionHistoryLimit: 5
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
   selector:
     matchLabels:
       app: etmsys-frontend
@@ -17,12 +25,27 @@ spec:
         app: etmsys-frontend
 
     spec:
+
       containers:
         - name: frontend
+
           image: piraidasan/etmsys-frontend:latest
 
+          imagePullPolicy: Always
+
           ports:
-            - containerPort: 80
+            - name: http
+              containerPort: 80
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
 
           readinessProbe:
             httpGet:
@@ -31,6 +54,8 @@ spec:
 
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
 
           livenessProbe:
             httpGet:
@@ -39,3 +64,5 @@ spec:
 
             initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
