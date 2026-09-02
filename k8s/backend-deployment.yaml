@@ -3,8 +3,17 @@ kind: Deployment
 metadata:
   name: etmsys-backend
   namespace: etmsys
+
 spec:
   replicas: 2
+
+  revisionHistoryLimit: 5
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
 
   selector:
     matchLabels:
@@ -16,19 +25,26 @@ spec:
         app: etmsys-backend
 
     spec:
+
       containers:
         - name: backend
+
           image: piraidasan/etmsys-backend:latest
 
+          imagePullPolicy: Always
+
           ports:
-            - containerPort: 9093
+            - name: http
+              containerPort: 9093
+              protocol: TCP
 
           env:
+
             - name: SERVER_PORT
               value: "9093"
 
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:mysql://YOUR-MYSQL-SERVICE:3306/etmsys"
+              value: "jdbc:mysql://172.16.1.89:3306/etmsys?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
 
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
@@ -42,16 +58,31 @@ spec:
                   name: etmsys-db-secret
                   key: password
 
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
           readinessProbe:
             httpGet:
               path: /etmsys/v1/user/captcha
               port: 9093
-            initialDelaySeconds: 20
+
+            initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
 
           livenessProbe:
             httpGet:
               path: /etmsys/v1/user/captcha
               port: 9093
-            initialDelaySeconds: 40
+
+            initialDelaySeconds: 60
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
