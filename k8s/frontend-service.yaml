@@ -1,1 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: etmsys-frontend
+  namespace: etmsys
 
+spec:
+  selector:
+    app: etmsys-frontend
+
+  ports:
+    - port: 80
+      targetPort: 80
+
+  type: ClusterIP
