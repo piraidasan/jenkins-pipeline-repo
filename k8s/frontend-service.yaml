@@ -5,11 +5,13 @@ metadata:
   namespace: etmsys
 
 spec:
+  type: ClusterIP
+
   selector:
     app: etmsys-frontend
 
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 80
-
-  type: ClusterIP
+      protocol: TCP
