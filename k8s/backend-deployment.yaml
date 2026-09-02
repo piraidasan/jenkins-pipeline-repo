@@ -1,1 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etmsys-backend
+  namespace: etmsys
+spec:
+  replicas: 2
 
+  selector:
+    matchLabels:
+      app: etmsys-backend
+
+  template:
+    metadata:
+      labels:
+        app: etmsys-backend
+
+    spec:
+      containers:
+        - name: backend
+          image: piraidasan/etmsys-backend:latest
+
+          ports:
+            - containerPort: 9093
+
+          env:
+            - name: SERVER_PORT
+              value: "9093"
+
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://YOUR-MYSQL-SERVICE:3306/etmsys"
+
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: etmsys-db-secret
+                  key: username
+
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: etmsys-db-secret
+                  key: password
+
+          readinessProbe:
+            httpGet:
+              path: /etmsys/v1/user/captcha
+              port: 9093
+            initialDelaySeconds: 20
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /etmsys/v1/user/captcha
+              port: 9093
+            initialDelaySeconds: 40
+            periodSeconds: 20
