@@ -5,7 +5,7 @@ metadata:
   namespace: etmsys
 
 spec:
-  type: ClusterIP
+  type: NodePort
 
   selector:
     app: etmsys-frontend
