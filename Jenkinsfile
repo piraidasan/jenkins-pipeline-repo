@@ -16,8 +16,9 @@ pipeline {
 
         K8S_NAMESPACE = 'etmsys'
 
-        // Kubernetes node used for external access
-        K8S_NODE_IP = '172.16.1.89'
+        // Kubernetes NodePort is discovered dynamically during the health check.
+        // Do NOT use the MySQL/terraform-node IP here unless it is actually a K8s node.
+        K8S_NODE_IP = ''
 
 
         // =====================================================
@@ -481,10 +482,24 @@ pipeline {
 
                     docker run -d \
                         --name etmsys-frontend-test \
+                        --add-host=etmsys-backend:127.0.0.1 \
                         -p 18081:80 \
                         ${FRONTEND_IMAGE}:${BUILD_NUMBER}
 
                     sleep 5
+
+                    echo ""
+                    echo "Container status:"
+                    docker ps -a --filter name=etmsys-frontend-test
+
+                    if ! docker inspect -f '{{.State.Running}}' etmsys-frontend-test 2>/dev/null | grep -q true
+                    then
+                        echo ""
+                        echo "NGINX CONTAINER FAILED TO START"
+                        echo ""
+                        docker logs --tail 200 etmsys-frontend-test || true
+                        exit 1
+                    fi
 
                     echo ""
                     echo "Testing NGINX configuration..."
@@ -799,9 +814,21 @@ pipeline {
 
 
                     echo ""
-                    echo "Frontend URL:"
-                    echo "http://${K8S_NODE_IP}:${FRONTEND_PORT}/"
+                    echo "Discovering a Kubernetes node IP..."
 
+                    NODE_IP=$(kubectl get nodes \
+                        -o jsonpath='{range .items[*]}{range .status.addresses[?(@.type=="InternalIP")]}{.address}{"\\n"}{end}{end}' \
+                        | head -1)
+
+                    if [ -z "$NODE_IP" ]
+                    then
+                        echo "ERROR: Could not determine a Kubernetes node InternalIP."
+                        kubectl get nodes -o wide
+                        exit 1
+                    fi
+
+                    echo "Kubernetes Node IP: $NODE_IP"
+                    echo "Frontend URL: http://${NODE_IP}:${FRONTEND_PORT}/"
 
                     echo ""
                     echo "Testing frontend..."
@@ -812,7 +839,7 @@ pipeline {
                         --retry 10 \
                         --retry-delay 3 \
                         --retry-connrefused \
-                        http://${K8S_NODE_IP}:${FRONTEND_PORT}/
+                        http://${NODE_IP}:${FRONTEND_PORT}/
 
 
                     echo ""
@@ -824,7 +851,7 @@ pipeline {
                         --retry 10 \
                         --retry-delay 3 \
                         --retry-connrefused \
-                        http://${K8S_NODE_IP}:${FRONTEND_PORT}/etmsys/v1/user/captcha \
+                        http://${NODE_IP}:${FRONTEND_PORT}/etmsys/v1/user/captcha \
                         > /tmp/captcha-response.json
 
 
@@ -872,7 +899,7 @@ pipeline {
 
                     echo ""
                     echo "Application:"
-                    echo "http://${K8S_NODE_IP}:${FRONTEND_PORT}/login"
+                    echo "NodePort: ${FRONTEND_PORT} (Kubernetes node IP discovered during health check)"
                 '''
             }
         }
@@ -908,7 +935,7 @@ ETMSYS CI/CD SUCCESS
 ==========================================
 
 Frontend:
-http://${K8S_NODE_IP}:${FRONTEND_PORT}/login
+NodePort ${FRONTEND_PORT} (Kubernetes node IP discovered during health check)
 
 Backend:
 Kubernetes internal service
